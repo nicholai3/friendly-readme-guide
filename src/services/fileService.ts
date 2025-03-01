@@ -1,4 +1,3 @@
-
 import { supabase } from "@/integrations/supabase/client";
 
 export type FileItem = {
@@ -104,13 +103,13 @@ export const fileService = {
   },
 
   /**
-   * Upload a file
+   * Upload a file for a specific client
    */
-  async uploadFile(file: File, clientId?: string): Promise<FileItem | null> {
+  async uploadFile(file: File, clientId: string): Promise<FileItem | null> {
     try {
       // Generate a unique file path
       const fileExt = file.name.split('.').pop() || '';
-      const filePath = `${crypto.randomUUID()}.${fileExt}`;
+      const filePath = `${clientId}/${crypto.randomUUID()}.${fileExt}`;
       
       // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
@@ -122,18 +121,13 @@ export const fileService = {
         throw uploadError;
       }
       
-      // Get the public URL
-      const { data: urlData } = supabase.storage
-        .from('client-files')
-        .getPublicUrl(filePath);
-        
       // Store file metadata in the database
       const fileData = {
         name: file.name,
         type: file.type,
         size: file.size,
-        uploaded_by: "AccountantName", // This should be replaced with actual user name
-        client_id: clientId || null,
+        uploaded_by: "Client", // This will be displayed as the uploader
+        client_id: clientId,
         storage_path: filePath // Add the storage path to the database
       };
       

@@ -1,15 +1,19 @@
-
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, MessageSquare, FileText } from "lucide-react";
+import { Loader2, MessageSquare, FileText, Download } from "lucide-react";
 import MessageList from "@/components/MessageList";
 import MessageInput from "@/components/MessageInput";
 import { useNavigate } from "react-router-dom";
+import FileList from "@/components/FileList";
+import FileUpload from "@/components/FileUpload";
+import { fileService, getFileType } from "@/services/fileService";
+import { getMessagesForClient, sendMessage } from "@/services/messageService";
+import { useQueryClient } from "@tanstack/react-query";
 
 const ClientDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -22,7 +26,6 @@ const ClientDashboard: React.FC = () => {
   const navigate = useNavigate();
   const bottomRef = React.useRef<HTMLDivElement>(null);
 
-  // Fetch client data
   useEffect(() => {
     const fetchClientData = async () => {
       if (!user) return;
@@ -30,7 +33,6 @@ const ClientDashboard: React.FC = () => {
       try {
         setLoading(true);
         
-        // First get the client record that matches this user's email
         const { data: clientData, error: clientError } = await supabase
           .from('clients')
           .select('*')
@@ -44,7 +46,6 @@ const ClientDashboard: React.FC = () => {
         
         setClientData(clientData);
         
-        // Fetch messages for this client
         if (clientData) {
           const { data: messagesData, error: messagesError } = await supabase
             .from('client_messages')
@@ -55,14 +56,13 @@ const ClientDashboard: React.FC = () => {
           if (messagesError) {
             console.error("Error fetching messages:", messagesError);
           } else {
-            // Format messages for the MessageList component
             const formattedMessages = messagesData.map(msg => ({
               id: msg.id,
               sender: {
-                id: msg.sender_is_user ? 'accountant' : 'client',
-                name: msg.sender_is_user ? 'Accountant' : 'You',
-                avatar: msg.sender_is_user ? '/avatars/7.png' : '/avatars/1.png',
-                isAccountant: msg.sender_is_user
+                id: msg.sender_is_user ? 'client' : 'accountant',
+                name: msg.sender_is_user ? 'You' : 'Your Accountant',
+                avatar: msg.sender_is_user ? '/avatars/1.png' : '/avatars/7.png',
+                isAccountant: !msg.sender_is_user
               },
               timestamp: new Date(msg.created_at),
               content: msg.content,
@@ -72,7 +72,6 @@ const ClientDashboard: React.FC = () => {
             setMessages(formattedMessages);
           }
           
-          // Fetch files for this client
           const { data: filesData, error: filesError } = await supabase
             .from('client_files')
             .select('*')
@@ -82,7 +81,17 @@ const ClientDashboard: React.FC = () => {
           if (filesError) {
             console.error("Error fetching files:", filesError);
           } else {
-            setFiles(filesData);
+            const formattedFiles = filesData.map(file => ({
+              id: file.id,
+              name: file.name,
+              type: getFileType(file.name),
+              size: file.size,
+              uploadedAt: new Date(file.uploaded_at),
+              uploadedBy: file.uploaded_by,
+              clientId: file.client_id,
+              storagePath: file.storage_path
+            }));
+            setFiles(formattedFiles);
           }
         }
       } catch (error: any) {
@@ -100,7 +109,35 @@ const ClientDashboard: React.FC = () => {
     fetchClientData();
   }, [user]);
 
-  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (!clientData) return;
+    
+    const channel = supabase
+      .channel('client-messages-changes')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'client_messages',
+        filter: `client_id=eq.${clientData.id}`
+      }, () => {
+        fetchClientMessages(clientData.id);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [clientData]);
+
+  const fetchClientMessages = async (clientId: string) => {
+    try {
+      const messages = await getMessagesForClient(clientId);
+      setMessages(messages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+    }
+  };
+
   useEffect(() => {
     if (bottomRef.current && activeTab === "messages") {
       bottomRef.current.scrollIntoView({ behavior: "smooth" });
@@ -111,7 +148,6 @@ const ClientDashboard: React.FC = () => {
     if (!clientData || !message.trim()) return;
     
     try {
-      // Add optimistic update
       const newMessage = {
         id: `temp-${Date.now()}`,
         sender: {
@@ -127,27 +163,10 @@ const ClientDashboard: React.FC = () => {
       
       setMessages([...messages, newMessage]);
       
-      // Save to database
-      const { data, error } = await supabase
-        .from('client_messages')
-        .insert({
-          client_id: clientData.id,
-          content: message,
-          sender_is_user: false, // false means client is sending
-          read: false
-        })
-        .select();
+      const success = await sendMessage(clientData.id, message, false);
       
-      if (error) throw error;
-      
-      // Replace temp message with actual database record
-      if (data && data.length > 0) {
-        setMessages(messages => messages.map(msg => 
-          msg.id === newMessage.id ? {
-            ...newMessage,
-            id: data[0].id
-          } : msg
-        ));
+      if (!success) {
+        throw new Error("Failed to send message");
       }
       
       toast({
@@ -159,6 +178,34 @@ const ClientDashboard: React.FC = () => {
       toast({
         title: "Error",
         description: "Failed to send message",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!clientData) return;
+    
+    try {
+      const uploadedFile = await fileService.uploadFile(file, clientData.id);
+      
+      if (!uploadedFile) {
+        throw new Error("Failed to upload file");
+      }
+      
+      setFiles([uploadedFile, ...files]);
+      
+      toast({
+        title: "File uploaded",
+        description: "Your file has been uploaded successfully"
+      });
+      
+      setActiveTab("files");
+    } catch (error: any) {
+      console.error("Error uploading file:", error);
+      toast({
+        title: "Error",
+        description: "Failed to upload file",
         variant: "destructive",
       });
     }
@@ -298,34 +345,25 @@ const ClientDashboard: React.FC = () => {
           <Card>
             <CardHeader>
               <CardTitle>Files</CardTitle>
-              <CardDescription>Documents shared with you</CardDescription>
+              <CardDescription>Documents shared with you and files you've uploaded</CardDescription>
             </CardHeader>
-            <CardContent>
-              {files.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  No files have been shared with you yet.
-                </div>
-              ) : (
-                <div className="border rounded-md divide-y">
-                  {files.map((file) => (
-                    <div key={file.id} className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-3">
-                        <FileText className="h-5 w-5 text-blue-500" />
-                        <div>
-                          <p className="font-medium">{file.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {new Date(file.uploaded_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                      <Button size="sm" variant="outline">
-                        <Download className="h-4 w-4 mr-2" />
-                        Download
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <CardContent className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium mb-4">Upload a new file</h3>
+                <FileUpload 
+                  onFileUpload={handleFileUpload}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                  maxSize={10 * 1024 * 1024} // 10MB
+                />
+              </div>
+              
+              <div>
+                <h3 className="text-lg font-medium mb-4">Your files</h3>
+                <FileList 
+                  files={files} 
+                  emptyMessage="No files have been shared with you yet."
+                />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

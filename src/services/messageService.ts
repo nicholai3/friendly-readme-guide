@@ -91,9 +91,10 @@ export const getMessagesForClient = async (clientId: string): Promise<Message[]>
       content: msg.content,
       timestamp: new Date(msg.created_at),
       sender: {
-        id: msg.sender_is_user ? clientId : 'accountant',
-        name: msg.sender_is_user ? 'Client' : 'Your Accountant',
-        isAccountant: !msg.sender_is_user
+        id: msg.sender_is_user ? 'accountant' : 'client',
+        name: msg.sender_is_user ? 'Your Accountant' : 'You',
+        avatar: msg.sender_is_user ? '/avatars/7.png' : '/avatars/1.png',
+        isAccountant: msg.sender_is_user
       },
       read: msg.read
     }));
@@ -110,7 +111,7 @@ export const sendMessage = async (clientId: string, content: string, isAccountan
       .insert({
         client_id: clientId,
         content,
-        sender_is_user: !isAccountant,
+        sender_is_user: isAccountant, // if accountant sends, sender_is_user=true
         read: isAccountant // If accountant sends, it's already read
       });
 
