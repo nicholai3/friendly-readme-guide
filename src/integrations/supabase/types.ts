@@ -15,6 +15,7 @@ export type Database = {
           id: string
           name: string
           size: number
+          storage_path: string | null
           type: string
           uploaded_at: string
           uploaded_by: string
@@ -24,6 +25,7 @@ export type Database = {
           id?: string
           name: string
           size: number
+          storage_path?: string | null
           type: string
           uploaded_at?: string
           uploaded_by: string
@@ -33,6 +35,7 @@ export type Database = {
           id?: string
           name?: string
           size?: number
+          storage_path?: string | null
           type?: string
           uploaded_at?: string
           uploaded_by?: string
