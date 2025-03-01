@@ -12,6 +12,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { UserProfile } from "@/types/auth";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -32,12 +34,46 @@ const Auth = () => {
   const [activeTab, setActiveTab] = useState<string>("login");
   const { signIn, signUp, user, loading } = useAuth();
   const navigate = useNavigate();
+  const [isUserLoading, setUserLoading] = useState(true);
+  
+  // Function to check the user's role and redirect accordingly
+  const checkUserRoleAndRedirect = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single();
+        
+      if (error) {
+        console.error("Error fetching user role:", error);
+        return;
+      }
+      
+      const userProfile = data as UserProfile;
+      
+      // Redirect based on role
+      if (userProfile.role === 'Client') {
+        navigate('/client-dashboard');
+      } else {
+        // Admin and Collaborator go to main dashboard
+        navigate('/');
+      }
+    } catch (error) {
+      console.error("Error checking user role:", error);
+    }
+  };
 
   useEffect(() => {
-    // If user is already logged in, redirect to homepage
-    if (user) {
-      navigate("/");
-    }
+    // If user is already logged in, check their role and redirect
+    const checkUserAndRedirect = async () => {
+      if (user) {
+        await checkUserRoleAndRedirect(user.id);
+      }
+      setUserLoading(false);
+    };
+    
+    checkUserAndRedirect();
   }, [user, navigate]);
   
   const loginForm = useForm<LoginFormValues>({
@@ -60,7 +96,7 @@ const Auth = () => {
   const onLoginSubmit = async (values: LoginFormValues) => {
     try {
       await signIn(values.email, values.password);
-      navigate("/");
+      // Redirect will happen in the useEffect after login
     } catch (error) {
       console.error("Login error:", error);
     }
@@ -76,7 +112,7 @@ const Auth = () => {
     }
   };
 
-  if (loading && user) {
+  if (loading || isUserLoading) {
     return (
       <div className="container mx-auto px-4 flex justify-center items-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin" />
@@ -154,7 +190,7 @@ const Auth = () => {
             <Card>
               <CardHeader>
                 <CardTitle>Create Account</CardTitle>
-                <CardDescription>Enter your details to create a new account</CardDescription>
+                <CardDescription>Enter your details to create a new client account</CardDescription>
               </CardHeader>
               <Form {...signupForm}>
                 <form onSubmit={signupForm.handleSubmit(onSignupSubmit)}>
@@ -198,6 +234,9 @@ const Auth = () => {
                         </FormItem>
                       )}
                     />
+                    <div className="text-sm text-muted-foreground">
+                      New accounts are registered as clients by default. Your accountant can update your role if needed.
+                    </div>
                   </CardContent>
                   <CardFooter>
                     <Button type="submit" className="w-full" disabled={loading}>
