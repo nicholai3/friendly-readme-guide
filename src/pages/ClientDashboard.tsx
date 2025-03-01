@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -5,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, MessageSquare, FileText, Download } from "lucide-react";
+import { Loader2, MessageSquare, FileText } from "lucide-react";
 import MessageList from "@/components/MessageList";
 import MessageInput from "@/components/MessageInput";
 import { useNavigate } from "react-router-dom";
@@ -13,7 +14,6 @@ import FileList from "@/components/FileList";
 import FileUpload from "@/components/FileUpload";
 import { fileService, getFileType } from "@/services/fileService";
 import { getMessagesForClient, sendMessage } from "@/services/messageService";
-import { useQueryClient } from "@tanstack/react-query";
 
 const ClientDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -33,11 +33,12 @@ const ClientDashboard: React.FC = () => {
       try {
         setLoading(true);
         
+        // Use maybeSingle() instead of single() to handle cases where no client record exists
         const { data: clientData, error: clientError } = await supabase
           .from('clients')
           .select('*')
           .eq('email', user.email)
-          .single();
+          .maybeSingle();
         
         if (clientError) {
           console.error("Error fetching client data:", clientError);
@@ -222,18 +223,29 @@ const ClientDashboard: React.FC = () => {
   if (!clientData) {
     return (
       <div className="container mx-auto px-4 py-8">
-        <Card>
+        <Card className="border-orange-300 bg-orange-50 dark:bg-orange-950/20">
           <CardHeader>
-            <CardTitle>Welcome</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-orange-700 dark:text-orange-400">Account Not Configured</CardTitle>
+            <CardDescription className="text-orange-600 dark:text-orange-300">
               Your account is not linked to any client record yet.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-muted-foreground mb-4">
-              Please contact your accountant to link your account to your client record.
+            <p className="text-orange-600 dark:text-orange-300 mb-4">
+              It looks like you're signed in with the email <span className="font-semibold">{user?.email}</span>, but 
+              this email hasn't been set up as a client in our system yet. Please contact your accountant to complete your account setup.
             </p>
-            <Button onClick={() => navigate('/')}>Back to Home</Button>
+            <div className="flex space-x-4">
+              <Button onClick={() => navigate('/')} variant="outline" className="border-orange-500 text-orange-700 hover:bg-orange-100 dark:hover:bg-orange-900/30">
+                Back to Home
+              </Button>
+              <Button 
+                onClick={() => {window.location.href = `mailto:support@example.com?subject=Client%20Dashboard%20Access&body=Hello,%0D%0A%0D%0AI'm unable to access the client dashboard. My email is ${user?.email}.%0D%0A%0D%0APlease help me get set up.%0D%0A%0D%0AThank you.`}}
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+              >
+                Contact Support
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
